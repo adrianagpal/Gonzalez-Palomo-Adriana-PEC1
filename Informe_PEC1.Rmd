@@ -42,7 +42,7 @@ dataValues <- read.csv("Metabotyping2018/datasets/DataValues_S013.csv")
 # Guardamos dataValues en formato texto
 write.table(dataValues, file = "dataValues.txt", sep = ",", row.names = TRUE, col.names = TRUE)
 
-# Metadatos de las variables
+# Información sobre las variables
 featuresInfo <- read.csv("Metabotyping2018/datasets/DataInfo_S013.csv")
 
 # Descripción metabolitos
@@ -100,14 +100,9 @@ head(featuresInfo)
 
 # Resumen metadatos individuos/ columnas
 head(samplesInfo)
-
-
-
-
-
 ```
 
-Creamos el contenedor de tipo *SummarizedExperiment* que contiene los datos, los metadatos de las columnas, los metadatos de las filas y la información de la investigación:
+Creamos el contenedor de tipo *SummarizedExperiment* que contiene los datos, la información de las columnas, la información de las filas y los metadatos de la investigación:
 
 ```{r}
 (se <- SummarizedExperiment(assays = list(count = dataValues),
@@ -424,7 +419,7 @@ ggtheme = theme_minimal()
 
 # Creación del archivo con los metadatos
 
-Guardamos los metadatos del estudio en un archihvo markdown.
+Guardamos los metadatos del estudio en un archivo markdown.
 
 ```{r}
 archivo <- "metadatos.md"
