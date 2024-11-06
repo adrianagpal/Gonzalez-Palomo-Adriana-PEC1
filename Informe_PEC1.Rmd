@@ -1,0 +1,481 @@
+---
+title: "Informe PEC1"
+author: "Adriana González"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("SummarizedExperiment")
+
+BiocManager:::install("POMA")
+
+library(POMA)
+library(SummarizedExperiment)
+library("FactoMineR")
+library("factoextra")
+library(dplyr)
+library(tidyr)
+library(ggtext)
+library(ggplot2)
+```
+
+Para esta actividad, he escogido el dataset "2018-MetabotypingPaper". En esta investigación, se estudia el impacto de la cirugía bariátrica en los perfiles metabólicos de los pacientes. El objetivo de la investigación es identificar distintos "metabotipos" basados en la evolución metabólica tras la cirugía. 
+
+En este informe, he descrito los distintos pasos de descarga de los datos, creación de un contenedor *SummarizedExperiment*, pre-procesamiento y exploración de los datos, y finalmente la subida de los archivos a un repositorio de GitHub.
+
+# Descarga de los datos
+
+Para descargar los datos, podemos hacerlo a través del repositorio de GitHub. Para ello, escribimos en la terminal *git clone* seguido de la dirección del repositorio: 
+
+**git clone https://github.com/nutrimetabolomics/Metabotyping2018**
+
+Una vez descargado en nuestro proyecto, podemos cargar los datos.  
+
+```{r}
+# Datos de indicadores antropométricos, clínicos y metabólicos
+dataValues <- read.csv("Metabotyping2018/datasets/DataValues_S013.csv")
+
+# Guardamos dataValues en formato texto
+write.table(dataValues, file = "dataValues.txt", sep = ",", row.names = TRUE, col.names = TRUE)
+
+# Metadatos de las variables
+featuresInfo <- read.csv("Metabotyping2018/datasets/DataInfo_S013.csv")
+
+# Descripción metabolitos
+AAInfo <- read.csv("Metabotyping2018/datasets/AAInformation_S006.csv")
+```
+
+# Creación del contenedor
+
+Creamos un contenedor del tipo *SummarizedExperiment*, incluyendo los valores de *dataValues* como datos. En cuanto a los metadatos, existe una tabla que proporciona información sobre el tipo de datos de cada variable medida en los datos, que utilizaremos como metadatos de las columnas. Además, podemos extraer algunas columnas de *dataValues* que poseen información relevante sobre los pacientes, para utilizarlas como metadatos de las filas.
+
+En primer lugar, extraeremos dichas columnas desde *dataValues* y las almacenaremos en *samplesInfo* para su uso posterior como metadatos de las muestras. 
+
+```{r}
+samplesInfo <- dataValues[,3:6] # Información sobre los individuos
+```
+
+Preparamos nuestro dataset a partir de *dataValues*. Realizamos una transposición de los datos, para que las muestras se dispongan en las columnas y las variables, en las filas. 
+
+```{r}
+# Eliminamos columna del dataset con todo NAs
+dataValues <- dataValues[,-258] 
+
+# Transponemos dataValues
+dataValues <- t(dataValues)
+
+# Nombramos las columnas con el número de muestra
+colnames(dataValues) <- seq(1, 39)
+
+# Convertimos conjunto de datos a matriz
+dataValues <- as.matrix(dataValues[7:695,])
+
+# Rellenamos los metadatos del experimento
+metadata <- list(Experimenter_name="Magali Palau-Rodriguez, Sara Tulipani, Anna Marco-Ramell, 
+                 Antonio Miñarro, Olga Jáuregui, Alex Sanchez-Pla, 
+                 Bruno Ramos-Molina, Francisco J Tinahones, Cristina Andres-Lacueva", 
+            Contact_info="aandres@ub.edu", 
+            Title="Metabotypes of response to bariatric surgery independent of the 
+            magnitude of weight loss")
+```
+
+Para preparar los metadatos de las variables, eliminamos las filas innecesarias de *featuresInfo*.
+
+```{r}
+# Eliminamos fila correspondiente a la columna con todo NAs del dataset
+featuresInfo <- featuresInfo[-257, ]
+
+# Seleccionamos variables excluyendo aquellas eliminadas de dataValues
+featuresInfo <- featuresInfo[6:694,]
+
+# Resumen datos
+head(dataValues)
+
+# Resumen metadatos variables/ filas
+head(featuresInfo)
+
+# Resumen metadatos individuos/ columnas
+head(samplesInfo)
+
+
+
+
+
+```
+
+Creamos el contenedor de tipo *SummarizedExperiment* que contiene los datos, los metadatos de las columnas, los metadatos de las filas y la información de la investigación:
+
+```{r}
+(se <- SummarizedExperiment(assays = list(count = dataValues),
+                           rowData = featuresInfo, 
+                           colData = samplesInfo,
+                           metadata = metadata))
+
+# Guardamos el contenedor en un archivo RDA
+save(se, file = "se_metabo.rda")
+```
+
+# Pre-procesamiento de los datos
+
+## Eliminación de NAs y normalización
+
+En primer lugar, analizaremos nuestro dataset  para identificar la presencia de valores faltantes (o NAs). Se puede observar que muchas de las muestras contienen una cantidad considerable de NAs. 
+
+Podemos utilizar la función *PomaImpute* para imputar los valores faltantes (o NAs). Utilizaremos el método de imputación 'knn', que estima los NAs en función de las muestras más similares, lo que minimiza la pérdida de información. 
+
+```{r}
+# Contamos NAs
+(na_count <- colSums(is.na(assay(se))))
+
+# Eliminamos NAs
+dataValues_clean <- PomaImpute(se, method = "knn")
+```
+
+Tras la eliminación de los NAs, algunos de los valores resultan negativos. Al normalizar, esto puede causar problemas si realizamos una transformación logarítmica. Por este motivo, al aplicar la función *PomaNorm* para la normalización de los datos, escogemos el método **auto_scaling**, que no conlleva ninguna transformación logarítmica.
+
+```{r}
+# Normalizamos datos
+(dataValues_norm <- dataValues_clean %>% PomaNorm(method = "auto_scaling"))
+```
+
+Tras la normalización observamos que el rango de los valores es mucho menor, lo cual facilitará su comparación. Los datos normalizados presentan una distribución similar y centrada en el cero, lo que nos indica que la normalización se ha realizado correctamente. 
+
+### Datos antes de normalizar 
+```{r}
+(boxplot_notnorm <- PomaBoxplots(dataValues_clean, x = "samples"))
+```
+
+### Datos después de normalizar 
+```{r}
+# Datos después de normalizar
+(boxplot_norm <- PomaBoxplots(dataValues_norm, x = "samples"))
+```
+
+# Exploración de los datos
+## Visualización de los datos
+
+En primer lugar, utilizaremos gráficos para visualizar los datos. Definimos una función que crea histogramas o gráficos de barras, en función del tipo de variable. 
+```{r}
+f <- function(x, name) {
+  if (is.numeric(x)) {
+    hist(x, breaks = 5, main = paste("Histograma de", name), xlab = name, ylab = "Frecuencia")
+  } else {
+    barplot(table(x), main = paste("Barplot de", name), xlab = name, ylab = "Frecuencia")
+  }
+}
+```
+
+Dado el gran número de variables que posee nuestro dataset, seleccionaremos un subconjunto para la visualización, a fin de mostrar la distribución de las variables a modo de ejemplo. Utilizaremos los datos no normalizados para preservar la escala original de los datos.   
+
+**Visualización de Indicadores Antropométricos**
+
+```{r}
+# Configuramos la disposición de los gráficos
+par(mfrow = c(3, 2), mar = c(4, 4, 2, 1))
+
+# Seleccionamos columnas con indicadores antropométricos T0 (medidos antes de la cirugía)
+ind_antropo <- (t(assay(dataValues_clean)))[,c(8:12)]
+
+# Aplicamos la función a cada fila, usando invisible() para evitar que los resultados 
+# de lapply se impriman
+invisible(lapply(1:ncol(ind_antropo), function(i) f(ind_antropo[,i],
+                                                    colnames(ind_antropo)[i])))
+```
+
+**Visualización de Indicadores de regulación de glucosa**
+
+```{r}
+par(mfrow = c(3, 2), mar = c(4, 4, 2, 1))
+
+# Seleccionamos columnas con indicadores de regulación de glucosa T0 (medidos antes de la cirugía)
+ind_gluc <- (t(assay(dataValues_clean)))[,c(5:7)]
+
+invisible(lapply(1:ncol(ind_gluc), function(i) f(ind_gluc[, i], 
+                                                         colnames(ind_gluc)[i])))
+```
+
+**Visualización de Indicadores clínicos**
+
+```{r}
+par(mfrow = c(3, 2), mar = c(1.8, 1.8, 1.8, 1))
+
+# Seleccionamos columnas con indicadores clínicos T0 (medidos antes de la cirugía)
+ind_clin <- (t(assay(dataValues_clean)))[, c(13:18)]
+
+invisible(lapply(1:ncol(ind_clin), function(i) f(ind_clin[, i], 
+                                                         colnames(ind_clin)[i])))
+
+par(mfrow = c(4, 2), mar = c(1.8, 1.8, 1.8, 1))
+
+ind_clin2 <- (t(assay(dataValues_clean)))[, c(19:25)]
+
+invisible(lapply(1:ncol(ind_clin2), function(i) f(ind_clin2[, i], 
+                                                         colnames(ind_clin2)[i])))
+```
+
+## Matriz de distancias
+
+Para analizar las relaciones entre las variables previamente visualizadas (antropométricas y regulación de glucosa), utilizaremos una matriz de distancias. Primero, crearemos un subconjunto del objeto *SummarizedExperiment* que incluye sólo las variables de interés. 
+
+### Datos no normalizados 
+
+```{r}
+# Creamos un subconjunto del contenedor
+col_selec <- se[rownames(se) %in% c("PESO_T0", "bmi_T0", "CINT_T0",
+                                             "CAD_T0","CC_T0", "GLU_T0", "INS_T0", 
+                                      "HOMA_T0", "HBA1C_T0"), ]
+
+# Calculamos matriz de distancias 
+manDist <- dist(assay(col_selec))
+
+# Convertimos en matriz y convertimos valores de la mitad inferior en NA
+lower_dist <- as.matrix(manDist)
+lower_dist[lower.tri((lower_dist))] <- NA
+
+# Generamos un heatmap para visualizar las distancias entre los individuos
+heatmap(lower_dist, 
+        col = heat.colors(16), 
+        Rowv = NA,       # No reorganizar filas
+        Colv = NA,       # No reorganizar columnas
+        scale = "none",  # No escalar
+        margins = c(5, 5), # Márgenes para las etiquetas
+        cexRow = 0.9,    # Tamaño fuente filas
+        cexCol = 0.9)    # Tamaño fuente columnas
+```
+
+
+### Datos normalizados 
+
+
+```{r}
+# Creamos un subconjunto del contenedor
+col_selec <- dataValues_norm[rownames(dataValues_norm) %in% c("PESO_T0", "bmi_T0", "CINT_T0",
+                                             "CAD_T0","CC_T0", "GLU_T0", "INS_T0", 
+                                      "HOMA_T0", "HBA1C_T0"), ]
+
+# Calculamos matriz de distancias 
+manDist <- dist(assay(col_selec))
+
+# Convertimos en matriz y convertimos valores de la mitad inferior en NA
+lower_dist <- as.matrix(manDist)
+lower_dist[lower.tri((lower_dist))] <- NA
+
+# Generamos un heatmap para visualizar las distancias entre los individuos
+heatmap(lower_dist, 
+        col = heat.colors(16), 
+        Rowv = NA,       # No reorganizar filas
+        Colv = NA,       # No reorganizar columnas
+        scale = "none",  # No escalar
+        margins = c(5, 5), # Márgenes para las etiquetas
+        cexRow = 0.9,    # Tamaño fuente filas
+        cexCol = 0.9)    # Tamaño fuente columnas
+```
+
+Los valores altos en la matriz de distancias, representados por colores blancos y amarillos, indican que las observaciones son muy diferentes entre sí. Sin embargo, los valores bajos, representados por colores más rojos, indican que las observaciones son similares entre sí.
+
+Las correlaciones observadas en los datos no normalizados no se observan en los normalizados, lo que indica que la escala de los datos influye en su correlación, y confirma la importancia de utilizar datos normalizados para obtener correlaciones representativas.
+
+Las correlaciones más altas se observan entre el peso y BMI, o peso y tamaño de cintura. También entre la variable HOMA (*Homeostatic Model Assessment*) y la insulina o el nivel de glucosa. 
+
+## Análisis de correlación
+
+Para entender cómo se relacionan las variables antropométricas y de regulación de glucosa en distintos momentos de recopilación de datos, podemos llevar a cabo un análisis de correlación. 
+
+### Correlación de Indicadores Antropométricos
+
+Compararemos los valores antes de la cirugía bariátrica (T0) y cuatro meses después de la misma (T4). No se ha comparado la variable T5 ya que se han eliminado muchas columnas debido a la presencia de NAs. 
+
+```{r}
+# Seleccionamos las filas con los indicadores de interés
+col_selec_antropo <- dataValues_norm[rownames(dataValues_norm) %in% c("PESO_T0", "bmi_T0", 
+                                                      "CINT_T0", "CAD_T0","CC_T0", "PESO_T4", 
+                                                      "bmi_T4", "CINT_T4", "CAD_T4","CC_T4"), ]
+
+# Realizamos el análisis de correlación
+PomaCorr(col_selec_antropo)
+```
+
+En el gráfico, podemos observar que existe una correlación fuerte para el BMI, tamaño de la cintura y el peso, entre los dos momentos de toma de datos. No es así para el tamaño de la cadera y la relación cintura/cadera. 
+
+
+### Correlación de Indicadores de regulación de glucosa
+
+```{r}
+col_selec_gluc <- dataValues_norm[rownames(dataValues_norm) %in% c("GLU_T0", "INS_T0", 
+                                                        "HOMA_T0", "GLU_T4", "INS_T4", "HOMA_T4"), ]
+
+PomaCorr(col_selec_gluc)
+```
+
+
+En el gráfico anterior, se observan correlaciones altas entre la variable HOMA y la insulina para el mismo tiempo de recopilación, lo que coincide con los resultados de la matriz de distancias.  
+
+## Análisis Factorial Múltiple (MFA)
+
+Debido al gran número de variables de nuestro dataset, sería interesante aplicar algunua técnica de reducción de la dimensionalidad. Vamos a estudiar cómo se relaccionan diferentes grupos de variables que tienen en común el momento de recopilación. 
+
+Los datos se recopilaron en cuatro momentos distintos, siendo "T0" los datos recopilados antes de la operación bariátrica, y T2, T4 y T5, los datos recopilados 2, 4 y 5 meses después de la operación, respectivamente. 
+
+```{r}
+# Transponemos los datos para que las variables se dispongan en las columnas
+datos_norm <- t(assay(dataValues_norm))
+
+# Contamos número de variables en cada grupo (momento de recopilación de datos)
+(count_T0 <- sum(grepl("T0$", colnames(datos_norm))))
+
+(count_T2 <- sum(grepl("T2$", colnames(datos_norm))))
+
+(count_T4 <- sum(grepl("T4$", colnames(datos_norm))))
+
+(count_T5 <- sum(grepl("T5$", colnames(datos_norm))))
+
+# Formamos los grupos de acuerdo al numero de variables
+groups <- c(164, 167, 166, 16)
+
+# Realizamos el Análisis Factorial Múltiple
+mfa_results <- MFA(datos_norm, 
+                   group = groups, 
+                   name.group = c("T0", "T2", "T4", "T5"),
+                   graph = FALSE)
+```
+
+Calculamos la proporción de la varianza explicada por cada cada dimensión y generamos un *scree plot* para visualizarlo. Observamos que las primeras 5 dimensiones explican la mayor parte de la varianza, alcanzando un total del 53%. A partir de la quinta dimensión, la línea se vuelve más plana, lo que indica que cada dimensión aporta cada vez menos a la explicación de la varianza.  
+
+```{r}
+# Varianzas 
+eig.val <- get_eigenvalue(mfa_results)
+head(eig.val)
+
+# Scree plot
+fviz_screeplot(mfa_results)
+```
+
+En la siguiente tabla y gráfica, podemos ver cómo los distintos grupos contribuyen a las dimensiones. Observamos que el grupo que contribuye en mayor medida a la primera dimensión es el T4, y a la segunda dimensión, el T5. Esto coincide con los resultados del artículo, que indica que el impacto de la cirugía bariátrica es tan intenso que las diferencias metabólicas iniciales se anulan.
+
+```{r}
+# Grupos de variables 
+group <- get_mfa_var(mfa_results, "group")
+
+# Contribuciones a las dimensiones
+head(group$contrib)
+
+# Visualización de contribuciones por grupo
+fviz_mfa_var(mfa_results, "group")
+```
+
+
+### Gráfico de los perfiles de los individuos
+
+A continuación, representaremos cómo se distribuyen los individuos en el espacio de las dimensiones principales, según las variables de los diferentes grupos (T0, T2, T4, T5), y sus contribuciones a las dimensiones principales.
+
+```{r}
+# Gráfico de los perfiles de los individuos
+fviz_mfa_ind(mfa_results, 
+             col.ind = "cos2", 
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+```
+
+## Agrupación jerárquica de las muestras
+
+Por último, haremos una aproximación para establecer la relación entre las muestras a través de un método de agrupamiento jerárquico. Este método permite identificar patrones de similitud entre las muestras basándose en sus características. Representaremos la estructura jerárquica del agrupamiento con un dendograma. Podemos modificar el método de la función *hclust* para obtener un agrupamiento que se adapte a nuestros datos. 
+
+```{r}
+assay_norm <- assay(dataValues_norm)
+
+# Calculamos matriz de distancias utilizando el método euclidean
+Distan <- dist(t(assay_norm), method="euclidean")
+
+# Realizamos el agrupamiento jerárquico utilizando el método ward.D2
+hc <- hclust(Distan, method="ward.D2")
+
+# Representamos la estructura jerárquica
+plot(hc)
+```
+
+### Agrupación por el método de k-means
+
+Utilizaremos también el método de k-means, una técnica de agrupamiento no jerárquico, para dividir las muestras en un número específico de grupos, basándose en sus características. 
+
+```{r}
+# Definimos el número de clusters
+k <- c(4)
+
+# Realizamos el agrupamiento k-means
+km <- kmeans(datos_norm, k, iter.max=1000)
+
+# Calculamos la media de la suma de cuadrados dentro de los grupos
+mean(km$withinss)
+
+# Visualizamos resultados del agrupamiento
+fviz_cluster(km, data = datos_norm,
+ellipse.type = "euclid", 
+star.plot = TRUE, 
+repel = TRUE, 
+ggtheme = theme_minimal()
+)
+
+```
+
+
+# Creación del archivo con los metadatos
+
+Guardamos los metadatos del estudio en un archihvo markdown.
+
+```{r}
+archivo <- "metadatos.md"
+
+titulo <- c("# Metadatos del Estudio", "")
+
+# Inicializamos el vector para almacenar los metadatos formateados
+output <- c()
+
+# Iteramos sobre los nombres de los campos en la lista de metadata
+for(name in names(metadata)){
+  output <- c(output, paste0("- **", name, "**: ", metadata[[name]]))
+}
+
+# Escribimos título y metadatos en el archivo de salida
+writeLines(c(titulo, output), archivo)
+```
+
+# Reposición de datos en github
+
+En primer lugar, creamos un repositorio de GitHub con el nombre indicado ("Gonzalez-Palomo-Adriana-PEC1), y lo hacemos público. La dirección del repositorio es la siguiente:
+
+*https://github.com/adrianagpal/Gonzalez-Palomo-Adriana-PEC1.git*
+
+A continuación, inicializamos el repositorio localmente:
+
+*git init*
+
+Añadimos los archivos con *git add*, por ejemplo:
+
+*git add metadatos.md*
+
+Una vez añadidos, realizamos un *git commit* con un mensaje descriptivo de lo que estamos subiendo al repositorio. Finalmente, realizamos un *git push*. La primera vez que subimos archivos al repositorio, sin embargo, es necesario realizar: 
+
+*git push -u origin main*
+
+# Referencias
+
+Morgan, Martin, Valerie Obenchain, Jim Hester, and Hervé Pagès. 2020. SummarizedExperiment: SummarizedExperiment Container. https://bioconductor.org/packages/SummarizedExperiment.
+
+Castellano-Escuder, Pol. 2024. Get Started: POMA. 
+https://www.bioconductor.org/packages/release/bioc/vignettes/POMA/inst/doc/POMA-workflow.html
+
+Castellano-Escuder, Pol. 2022. POMA Workflow. 
+http://bioconductor.jp/packages/3.16/bioc/vignettes/POMA/inst/doc/POMA-demo.html
+
+Sánchez, A., Carmona, F. 2024. Casos y Ejemplos de Análisis Multivariante con R. 
+https://aspteaching.github.io/AMVCasos/
+
+Palau-Rodriguez M, Tulipani S, Marco-Ramell A, Miñarro A, Jáuregui O, Sanchez-Pla A, et al. (2018) Metabotypes of response to bariatric surgery independent of the magnitude of weight loss. PLoS ONE 13(6): e0198214. https://doi.org/10.1371/journal.pone.0198214
+
+```{r}
+sessionInfo()
+```
