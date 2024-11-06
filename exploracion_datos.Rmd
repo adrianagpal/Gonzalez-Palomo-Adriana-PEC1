@@ -1,0 +1,245 @@
+---
+title: "exploracion_datos"
+author: "Adriana González"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+# Pre-procesamiento de los datos
+
+## Eliminación de NAs y normalización
+
+```{r}
+# Sustituir "se" por el nombre de nuestro objeto SummarizedExperiment
+# Eliminamos NAs
+dataValues_clean <- PomaImpute(se, method = "knn")
+
+# Normalizamos datos
+(dataValues_norm <- dataValues_clean %>% PomaNorm(method = "auto_scaling"))
+```
+
+# Exploración de los datos
+## Visualización de los datos
+
+```{r}
+# Función para representar histogramas o gráficos de barras
+f <- function(x, name) {
+  if (is.numeric(x)) {
+    hist(x, breaks = 5, main = paste("Histograma de", name), xlab = name, ylab = "Frecuencia")
+  } else {
+    barplot(table(x), main = paste("Barplot de", name), xlab = name, ylab = "Frecuencia")
+  }
+}
+```
+
+**Visualización de Indicadores Antropométricos**
+
+```{r}
+# Configuramos la disposición de los gráficos
+par(mfrow = c(3, 2), mar = c(4, 4, 2, 1))
+
+# Seleccionamos columnas con indicadores antropométricos T0 (medidos antes de la cirugía)
+ind_antropo <- (t(assay(dataValues_clean)))[,c(8:12)]
+
+# Aplicamos la función a cada fila, usando invisible() para evitar que los resultados 
+# de lapply se impriman
+invisible(lapply(1:ncol(ind_antropo), function(i) f(ind_antropo[,i],
+                                                    colnames(ind_antropo)[i])))
+```
+
+**Visualización de Indicadores de regulación de glucosa**
+
+```{r}
+par(mfrow = c(3, 2), mar = c(4, 4, 2, 1))
+
+# Seleccionamos columnas con indicadores de regulación de glucosa T0 (medidos antes de la cirugía)
+ind_gluc <- (t(assay(dataValues_clean)))[,c(5:7)]
+
+invisible(lapply(1:ncol(ind_gluc), function(i) f(ind_gluc[, i], 
+                                                         colnames(ind_gluc)[i])))
+```
+
+**Visualización de Indicadores clínicos**
+
+```{r}
+par(mfrow = c(3, 2), mar = c(1.8, 1.8, 1.8, 1))
+
+# Seleccionamos columnas con indicadores clínicos T0 (medidos antes de la cirugía)
+ind_clin <- (t(assay(dataValues_clean)))[, c(13:18)]
+
+invisible(lapply(1:ncol(ind_clin), function(i) f(ind_clin[, i], 
+                                                         colnames(ind_clin)[i])))
+
+par(mfrow = c(4, 2), mar = c(1.8, 1.8, 1.8, 1))
+
+ind_clin2 <- (t(assay(dataValues_clean)))[, c(19:25)]
+
+invisible(lapply(1:ncol(ind_clin2), function(i) f(ind_clin2[, i], 
+                                                         colnames(ind_clin2)[i])))
+```
+
+## Matriz de distancias
+
+### Datos no normalizados 
+
+```{r}
+# Creamos un subconjunto del contenedor
+col_selec <- se[rownames(se) %in% c("PESO_T0", "bmi_T0", "CINT_T0",
+                                             "CAD_T0","CC_T0", "GLU_T0", "INS_T0", 
+                                      "HOMA_T0", "HBA1C_T0"), ]
+
+# Calculamos matriz de distancias 
+manDist <- dist(assay(col_selec))
+
+# Convertimos en matriz y convertimos valores de la mitad inferior en NA
+lower_dist <- as.matrix(manDist)
+lower_dist[lower.tri((lower_dist))] <- NA
+
+# Generamos un heatmap para visualizar las distancias entre los individuos
+heatmap(lower_dist, 
+        col = heat.colors(16), 
+        Rowv = NA,       # No reorganizar filas
+        Colv = NA,       # No reorganizar columnas
+        scale = "none",  # No escalar
+        margins = c(5, 5), # Márgenes para las etiquetas
+        cexRow = 0.9,    # Tamaño fuente filas
+        cexCol = 0.9)    # Tamaño fuente columnas
+```
+
+### Datos normalizados 
+
+```{r}
+# Creamos un subconjunto del contenedor
+col_selec <- dataValues_norm[rownames(dataValues_norm) %in% c("PESO_T0", "bmi_T0", "CINT_T0",
+                                             "CAD_T0","CC_T0", "GLU_T0", "INS_T0", 
+                                      "HOMA_T0", "HBA1C_T0"), ]
+
+# Calculamos matriz de distancias 
+manDist <- dist(assay(col_selec))
+
+# Convertimos en matriz y convertimos valores de la mitad inferior en NA
+lower_dist <- as.matrix(manDist)
+lower_dist[lower.tri((lower_dist))] <- NA
+
+# Generamos un heatmap para visualizar las distancias entre los individuos
+heatmap(lower_dist, 
+        col = heat.colors(16), 
+        Rowv = NA,       # No reorganizar filas
+        Colv = NA,       # No reorganizar columnas
+        scale = "none",  # No escalar
+        margins = c(5, 5), # Márgenes para las etiquetas
+        cexRow = 0.9,    # Tamaño fuente filas
+        cexCol = 0.9)    # Tamaño fuente columnas
+```
+
+## Análisis de correlación
+
+### Correlación de Indicadores Antropométricos
+
+```{r}
+# Seleccionamos las filas con los indicadores de interés
+col_selec_antropo <- dataValues_norm[rownames(dataValues_norm) %in% c("PESO_T0", "bmi_T0", 
+                                                      "CINT_T0", "CAD_T0","CC_T0", "PESO_T4", 
+                                                      "bmi_T4", "CINT_T4", "CAD_T4","CC_T4"), ]
+
+# Realizamos el análisis de correlación
+PomaCorr(col_selec_antropo)
+```
+
+### Correlación de Indicadores de regulación de glucosa
+
+```{r}
+col_selec_gluc <- dataValues_norm[rownames(dataValues_norm) %in% c("GLU_T0", "INS_T0", 
+                                                        "HOMA_T0", "GLU_T4", "INS_T4", "HOMA_T4"), ]
+
+PomaCorr(col_selec_gluc)
+```
+
+## Análisis Factorial Múltiple (MFA)
+
+```{r}
+# Transponemos los datos para que las variables se dispongan en las columnas
+datos_norm <- t(assay(dataValues_norm))
+
+# Contamos número de variables en cada grupo (momento de recopilación de datos)
+(count_T0 <- sum(grepl("T0$", colnames(datos_norm))))
+
+(count_T2 <- sum(grepl("T2$", colnames(datos_norm))))
+
+(count_T4 <- sum(grepl("T4$", colnames(datos_norm))))
+
+(count_T5 <- sum(grepl("T5$", colnames(datos_norm))))
+
+# Formamos los grupos de acuerdo al numero de variables
+groups <- c(164, 167, 166, 16)
+
+# Realizamos el Análisis Factorial Múltiple
+mfa_results <- MFA(datos_norm, 
+                   group = groups, 
+                   name.group = c("T0", "T2", "T4", "T5"),
+                   graph = FALSE)
+```
+
+```{r}
+# Varianzas 
+eig.val <- get_eigenvalue(mfa_results)
+head(eig.val)
+
+# Scree plot
+fviz_screeplot(mfa_results)
+```
+
+```{r}
+# Grupos de variables 
+group <- get_mfa_var(mfa_results, "group")
+
+# Contribuciones a las dimensiones
+head(group$contrib)
+
+# Visualización de contribuciones por grupo
+fviz_mfa_var(mfa_results, "group")
+```
+
+### Gráfico de los perfiles de los individuos
+
+```{r}
+# Gráfico de los perfiles de los individuos
+fviz_mfa_ind(mfa_results, 
+             col.ind = "cos2", 
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+```
+
+## Agrupación jerárquica de las muestras
+
+```{r}
+assay_norm <- assay(dataValues_norm)
+
+# Calculamos matriz de distancias utilizando el método euclidean
+Distan <- dist(t(assay_norm), method="euclidean")
+
+# Realizamos el agrupamiento jerárquico utilizando el método ward.D2
+hc <- hclust(Distan, method="ward.D2")
+
+# Representamos la estructura jerárquica
+plot(hc)
+```
+
+### Agrupación por el método de k-means
+
+```{r}
+# Definimos el número de clusters
+k <- c(4)
+
+# Realizamos el agrupamiento k-means
+km <- kmeans(datos_norm, k, iter.max=1000)
+
+# Calculamos la media de la suma de cuadrados dentro de los grupos
+mean(km$withinss)
+
+# Visualizamos resultados del agrupamiento
+fviz_cluster(km, data = datos_norm,
+ellipse.type = "euclid", 
+star.plot = TRUE, 
+repel = TRUE, 
+ggtheme = theme_minimal())
+```
